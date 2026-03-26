@@ -64,11 +64,26 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 60vh;
+      min-height: 40vh;
       color: #555;
       font-size: 14px;
       text-align: center;
       padding: 16px;
+    }
+    .section-header {
+      color: #555;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 16px 16px 8px;
+      border-top: 1px solid #222;
+    }
+    .event-date {
+      color: #555;
+      font-size: 12px;
+      flex-shrink: 0;
+      margin-left: 12px;
+      text-align: right;
     }
   </style>
 </head>
@@ -112,33 +127,73 @@
       return d.innerHTML;
     }
 
+    function getTomorrowRange() {
+      var now = new Date();
+      var tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      var dayAfter = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2);
+      return { start: tomorrow.getTime(), end: dayAfter.getTime() };
+    }
+
+    function formatDateShort(dateStr) {
+      var d = new Date(dateStr);
+      return d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' });
+    }
+
+    function renderEventRow(e, now, showCountdown) {
+      var time = formatTime(e.date);
+      var price = formatPrice(e.price);
+      var right = '';
+      if (showCountdown) {
+        var countdown = formatCountdown(e._ts - now);
+        right = '<div class="event-countdown">' + countdown + '</div>';
+      } else {
+        right = '<div class="event-date">' + time + '</div>';
+      }
+      return '<a class="event" href="' + esc(e.url) + '" target="_blank" rel="noopener">' +
+        '<div class="event-info">' +
+          '<div class="event-name">' + esc(e.name) + '</div>' +
+          '<div class="event-meta">' + esc(e.venue) + ' · ' + time + ' · ' + price + '</div>' +
+        '</div>' +
+        right +
+      '</a>';
+    }
+
     function renderEvents(events) {
       const app = document.getElementById('app');
       const now = Date.now();
       const windowEnd = now + WINDOW_HOURS * 60 * 60 * 1000;
+      const tomorrow = getTomorrowRange();
 
-      const filtered = events
+      const allEvents = events
         .map(function(e) { return Object.assign({}, e, { _ts: new Date(e.date).getTime() }); })
+        .filter(function(e) { return !isNaN(e._ts); });
+
+      const soonEvents = allEvents
         .filter(function(e) { return e._ts > now && e._ts <= windowEnd; })
         .sort(function(a, b) { return a._ts - b._ts; });
 
-      if (filtered.length === 0) {
-        app.innerHTML = '<div class="state">No events in the next 4 hours</div>';
-        return;
+      const tomorrowEvents = allEvents
+        .filter(function(e) { return e._ts >= tomorrow.start && e._ts < tomorrow.end; })
+        .sort(function(a, b) { return a._ts - b._ts; });
+
+      var html = '';
+
+      // Next 4 hours section
+      if (soonEvents.length > 0) {
+        html += '<div class="event-list">' +
+          soonEvents.map(function(e) { return renderEventRow(e, now, true); }).join('') +
+        '</div>';
+      } else {
+        html += '<div class="state">No events in the next 4 hours</div>';
       }
 
-      var html = '<div class="event-list">' + filtered.map(function(e) {
-        var countdown = formatCountdown(e._ts - now);
-        var time = formatTime(e.date);
-        var price = formatPrice(e.price);
-        return '<a class="event" href="' + esc(e.url) + '" target="_blank" rel="noopener">' +
-          '<div class="event-info">' +
-            '<div class="event-name">' + esc(e.name) + '</div>' +
-            '<div class="event-meta">' + esc(e.venue) + ' · ' + time + ' · ' + price + '</div>' +
-          '</div>' +
-          '<div class="event-countdown">' + countdown + '</div>' +
-        '</a>';
-      }).join('') + '</div>';
+      // Tomorrow section
+      if (tomorrowEvents.length > 0) {
+        html += '<div class="section-header">Tomorrow</div>';
+        html += '<div class="event-list">' +
+          tomorrowEvents.map(function(e) { return renderEventRow(e, now, false); }).join('') +
+        '</div>';
+      }
 
       app.innerHTML = html;
     }
