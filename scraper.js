@@ -71,6 +71,53 @@ async function getEventUrls() {
   return [...allUrls];
 }
 
+async function extractTimeFromPage($, eventUrl) {
+  // Strategy 1: Try div.date text — look for "ora HH:MM" pattern
+  const dateText = $('div.date').first().text();
+  const oraMatch = dateText.match(/ora\s+(\d{1,2}:\d{2})/);
+  if (oraMatch) {
+    return oraMatch[1]; // e.g. "20:00"
+  }
+
+  // Strategy 2: If hallId links exist, fetch the first one and parse data-hall-config
+  const hallIds = [];
+  $('a[href*="hallId"]').each((_, el) => {
+    try {
+      const href = $(el).attr('href');
+      const url = new URL(href, BASE_URL);
+      const hallId = url.searchParams.get('hallId');
+      if (hallId && !hallIds.includes(hallId)) hallIds.push(hallId);
+    } catch (e) {}
+  });
+
+  if (hallIds.length > 0) {
+    const hallUrl = `${eventUrl}?hallId=${hallIds[0]}`;
+    const hallHtml = await fetchPage(hallUrl);
+    if (hallHtml) {
+      const h$ = cheerio.load(hallHtml);
+      const raw = h$('.hall-container').attr('data-hall-config');
+      if (raw) {
+        try {
+          const config = JSON.parse(raw);
+          const today = new Date().toISOString().split('T')[0];
+          const upcoming = (config.timeslots || [])
+            .filter(t => t.start_datetime && t.start_datetime >= today)
+            .sort((a, b) => a.start_datetime.localeCompare(b.start_datetime));
+          if (upcoming.length > 0) {
+            // start_datetime is "2026-03-30 13:45:00" — extract time portion
+            const timePart = upcoming[0].start_datetime.split(' ')[1];
+            return timePart ? timePart.slice(0, 5) : null; // "13:45"
+          }
+        } catch (e) {
+          // Malformed config, skip
+        }
+      }
+    }
+  }
+
+  return null; // No time found
+}
+
 async function getEventDetails(eventUrl) {
   const html = await fetchPage(eventUrl);
   if (!html) return null;
@@ -98,6 +145,15 @@ async function getEventDetails(eventUrl) {
       // Malformed JSON-LD, skip
     }
   });
+
+  if (event && event.date) {
+    // Attempt to extract start time and combine into ISO datetime
+    const time = await extractTimeFromPage($, eventUrl);
+    if (time) {
+      // date is "2026-03-27", time is "20:00" → "2026-03-27T20:00:00"
+      event.date = `${event.date}T${time}:00`;
+    }
+  }
 
   return event;
 }
